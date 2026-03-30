@@ -1,9 +1,9 @@
 use crate::sdl_keycode::SdlKeycode;
-use clap::Parser;
-use frozen_collections::Scalar;
-use esperto::combo::ComboHandler;
+use clap::{Parser, ValueEnum};
+use esperto::combo::{ComboHandler, ComboHandlerCounting, ComboHandlerDyn, ComboHandlerSimple, ComboHandlerStrict};
 use esperto::config::Config;
-use esperto::types::{Event, Kind};
+use esperto::types::{Event, HandlingResult, Kind};
+use frozen_collections::Scalar;
 use sdl3::event;
 use sdl3::hint;
 use sdl3::joystick::JoystickId;
@@ -11,6 +11,7 @@ use sdl3::pixels::Color;
 use sdl3::rect::Rect;
 use sdl3::video::WindowFlags;
 use serde::Deserialize;
+use std::collections::VecDeque;
 use std::convert::Into;
 use std::fmt::Debug;
 use std::fs;
@@ -48,6 +49,18 @@ struct Args {
    /// Capture system keyboard shortcuts
    #[arg(short = 'C', long)]
    capture: bool,
+
+   /// Sanitization mode for duplicated events
+   #[arg(short = 'm', long, value_name = "MODE", default_value = "counting")]
+   mode: Mode,
+}
+
+#[derive(ValueEnum, Debug, Clone)]
+#[clap(rename_all = "kebab_case")]
+enum Mode {
+   Strict,
+   Counting,
+   None,
 }
 
 #[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash, Scalar, Deserialize, Debug)]
@@ -106,6 +119,17 @@ fn get_system_font_bytes() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
    })
 }
 
+fn handler_with_mode(
+   mode: Mode,
+   config: &Config<SdlKeycode, usize>,
+) -> ComboHandlerDyn<SdlKeycode, usize, VecDeque<Event<usize>>> {
+   match mode {
+      Mode::Strict => ComboHandlerStrict::new(config).into(),
+      Mode::Counting => ComboHandlerCounting::new(config).into(),
+      Mode::None => ComboHandlerSimple::new(config).into(),
+   }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
    let args = Args::parse();
    let template_config: Config<SdlKeycode, Yes> = if let Some(config) = args.config {
@@ -114,11 +138,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       serde_yaml::from_str(include_str!("demo.yaml"))?
    };
    let warnings = template_config.validate()?;
-   for warning in warnings{
+   for warning in warnings {
       println!("Warning: {}", warning);
    }
    let config = compile_config(template_config);
-   let mut combo_handler = ComboHandler::new(&config);
+   let mut combo_handler = handler_with_mode(args.mode, &config);
 
    let mut actions: Vec<DisplayAction> = config
       .iter_actions()
@@ -215,12 +239,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
          };
          println!("SDL event: {:?} {} {}", event.kind, event.keycode, event.value);
-         combo_handler.handle(event);
+         if let result @ (HandlingResult::DoubleDown | HandlingResult::DoubleUp) = combo_handler.handle(event) {
+            println!("{:?}", result)
+         }
          while let Some(Event {
             keycode: action,
             kind,
             value,
-         }) = combo_handler.events.pop_front()
+         }) = combo_handler.events().pop_front()
          {
             actions[action].error |= actions[action].kind == kind && kind != Kind::Axis;
             if !actions[action].error {

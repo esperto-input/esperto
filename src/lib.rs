@@ -2,8 +2,7 @@
 
 /// Module with the implementation of the combo algorithm.
 ///
-/// Exports the [`combo::ComboHandler`] struct, which is the main entrypoint
-/// of the library.
+/// Exports the [`combo::ComboHandler`] trait, which is the main entrypoint of the library.
 pub mod combo;
 
 /// Configuration types

@@ -17,11 +17,11 @@ pub struct Event<T: Keycode> {
    pub keycode: T,
    /// What kind of event
    pub kind: Kind,
-   /// Axis value, only relevant for [`Kind::Axis`] 
+   /// Axis value, only relevant for [`Kind::Axis`]
    pub value: i16,
 }
 
-/// This trait is auto-implemented if the requirement are satisfied 
+/// This trait is auto-implemented if the requirement are satisfied
 pub trait Keycode: Hash + Scalar {}
 
 impl<T: Hash + Scalar> Keycode for T {}
@@ -73,7 +73,6 @@ pub enum ConfigValidationWarning<A> {
    EmptyModifierGroup(String),
 }
 
-
 impl<A: Debug> Debug for ConfigValidationWarning<A> {
    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
       match self {
@@ -91,4 +90,17 @@ impl<A: Debug> Display for ConfigValidationWarning<A> {
    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
       Debug::fmt(self, f)
    }
+}
+
+/// Type returned by handling methods
+#[derive(PartialEq, Eq, Debug)]
+pub enum HandlingResult {
+   /// The event is not managed by this handler, thus it is not handled
+   Unhandled,
+   /// The event was handled regularly
+   Ok,
+   /// The event was handled but was detected as a duplicated keydown and ignored
+   DoubleDown,
+   /// The event was handled but was detected as a duplicated keyup and ignored
+   DoubleUp,
 }

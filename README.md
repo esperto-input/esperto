@@ -3,7 +3,7 @@
 This crate provides a performant implementation of the esperto input system, a powerful and robust system for key combinations.
 The implementation is generic, so that it can be easily plugged into new and existing systems, regardless of their needs.
 
-The main functionalities are provided by the [`combo::ComboHandler`] struct.
+The main functionalities are provided by the [`combo::ComboHandler`] trait.
 
 The crate also provides a SDL3 based demo in the examples section, that prints recognized key combinations on a window.
 
@@ -88,7 +88,7 @@ The chord specification, summarized:
 * a chord effect ends when any involved key is relased
 
 In our architecture, the chord system sits in front of the combo system. It essentially acts as a temporal filter on the stream of events.\
-It intrinsically introduces **delay**, which may vary depending on the existence of chords composed of keys within *t*, at any given time. In other words, if there are no chords which are supersets of the keys within *t*, the oldest key can immediately issued.
+It intrinsically introduces **delay**, which may vary depending on the existence of chords composed of keys within *t*, at any given time. In other words, if there are no chords which are supersets of the keys within *t*, the oldest key can be immediately issued.
 
 We are considering to expose an options to request a constant delay.
 
