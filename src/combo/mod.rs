@@ -46,10 +46,6 @@ impl<A: Keycode, Z: Keycode> ComboHandlerSimple<A, Z, VecDeque<Event<Z>>> {
 }
 
 impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
-   fn is_masking(&self) -> bool {
-      self.masks > 0
-   }
-
    /// Creates the handler object from a configuration object, using the provided queue.
    ///
    /// This method does a lot precomputation in order to speed up subsequent calls to
@@ -94,13 +90,13 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
             let groups_end = keys_groups.len();
 
             Key {
+               flags: types::LATCHING_MASK * self.latching as u8
+                  | types::IMMEDIATE_MASK * self.immediate as u8
+                  | types::FRESH_MASK,
                action: self.action,
-               latching: self.latching,
-               immediate: self.immediate,
                combos: Range::new(combos_start, combos_end),
                groups: Range::new(groups_start, groups_end),
                cache_counter: 0,
-               open: false,
                active_combo: None,
                counter: 0,
             }
@@ -288,7 +284,7 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
 
    fn resolve(&mut self, key: usize, kind: Kind, value: i16) {
       match kind {
-         Kind::Down | Kind::Axis => {
+         Kind::Down | Kind::AxisUpdate => {
             let mut invalidate_cache = false;
             self.keys[key].open();
 
@@ -305,7 +301,7 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
                         // singletons do not close themselves
                         for key in self.groups[*group].iter_keys(&self.groups_keys) {
                            // close all delayed modifier keys
-                           self.keys[*key].open &= self.keys[*key].is_immediate();
+                           self.keys[*key].set_open(self.keys[*key].is_open() && self.keys[*key].is_immediate());
                         }
                      }
                      for group in self.groups[*group].iter_pred(&self.groups_pred) {
@@ -320,18 +316,21 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
                   }
                }
             } else {
-               self.keys[key].immediate = true;
-               self.keys[key].latching = true;
+               // we do not require keys to be explicitly marked as axis in the configuration,
+               // as we can infer that. We must explicitly override nonsense
+               self.keys[key].set_axis(true);
+               self.keys[key].set_flag_immediate(true);
+               self.keys[key].set_latching(false);
             }
 
             self.invalidate_cache(invalidate_cache);
 
             // optimization: skip conflict resolution on closed keyup modifier keys
-            if !self.keys[key].is_immediate() && !self.keys[key].open {
+            if !self.keys[key].is_immediate() && self.keys[key].is_closed() {
                return;
             }
 
-            self.keys[key].open &= !self.is_masking();
+            self.keys[key].set_open(self.keys[key].is_open() && !self.is_masking());
 
             if self.keys[key].cache_counter == self.cache_counter {
                if self.keys[key].is_immediate() {
@@ -340,7 +339,7 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
                      .active_combo
                      .and_then(|i| {
                         let combo = self.keys[key].get_combo(i, &self.keys_combos);
-                        if !self.keys[key].latching {
+                        if !self.keys[key].is_latching() {
                            self.groups[combo.group].active_combos.insert(key);
                         }
                         combo.action
@@ -393,31 +392,50 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
                return;
             }
 
-            // singletons do not close themselves to allow delayed modifier keys
-            if self.groups[candidate_group].size == 1 {
-               for key in self.groups[candidate_group].iter_keys(&self.groups_keys) {
-                  if !self.keys[*key].is_immediate() {
-                     // immediate modifiers still got to send their keyup
-                     self.keys[*key].close();
-                  }
-               }
+            // no conflicts, can activate combo
+
+            // singleton modifier groups have been left open to allow delayed modifier keys
+            if let Some(&key) = self.groups[candidate_group].iter_keys(&self.groups_keys).next()
+               // allow immediate modifiers to send their keyup
+               && !self.keys[key].is_immediate()
+            {
+               self.keys[key].close();
             }
 
-            // no conflicts activate combo
-            if !self.keys[key].latching {
-               self.groups[candidate_group].active_combos.insert(key);
+            if let Some(action) = self.keys[key].get_combo(candidate_combo, &self.keys_combos).action {
+               // keyup modifiers must be closed too
+               if !self.keys[key].is_latching() {
+                  self.groups[candidate_group].active_combos.insert(key);
+               }
+               if self.keys[key].is_axis() && self.keys[key].active_combo != Some(candidate_combo) {
+                  // disengage unmodified axis
+                  if self.keys[key].active_combo.is_none()
+                     && let Some(action) = self.keys[key].action
+                     && !self.keys[key].is_fresh()
+                  {
+                     self.events.push(Event {
+                        keycode: action,
+                        kind: Kind::AxisDisengage,
+                        value: 0,
+                     });
+                     self.keys[key].set_fresh(true);
+                  }
+                  self.events.push(Event {
+                     keycode: action,
+                     kind: Kind::AxisEngage,
+                     value: 0,
+                  });
+               }
+               if self.keys[key].is_immediate() {
+                  self.events.push(Event {
+                     keycode: action,
+                     kind,
+                     value,
+                  });
+                  self.keys[key].open();
+               }
+               self.keys[key].active_combo = Some(candidate_combo);
             }
-            if self.keys[key].is_immediate()
-               && let Some(action) = self.keys[key].get_combo(candidate_combo, &self.keys_combos).action
-            {
-               self.events.push(Event {
-                  keycode: action,
-                  kind,
-                  value,
-               });
-               self.keys[key].open();
-            }
-            self.keys[key].active_combo = Some(candidate_combo);
          }
          Kind::Up => {
             let mut invalidate_cache = false;
@@ -440,7 +458,7 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
 
             self.invalidate_cache(invalidate_cache);
 
-            if self.keys[key].open {
+            if self.keys[key].is_open() {
                self.keys[key]
                   .active_combo
                   .and_then(|i| {
@@ -465,6 +483,7 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
                   });
             }
          }
+         Kind::AxisEngage | Kind::AxisDisengage => {}
       }
    }
 
@@ -477,6 +496,25 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
          && self.keys[key].is_immediate()
          && let Some(action) = self.keys[key].action
       {
+         if self.keys[key].is_axis() {
+            if let Some(combo) = self.keys[key].active_combo {
+               let action = self.keys[key].get_combo(combo, &self.keys_combos).action.unwrap();
+               self.events.push(Event {
+                  keycode: action,
+                  kind: Kind::AxisDisengage,
+                  value: 0,
+               });
+               self.keys[key].active_combo = None;
+            }
+            if self.keys[key].is_fresh() {
+               self.events.push(Event {
+                  keycode: action,
+                  kind: Kind::AxisEngage,
+                  value: 0,
+               });
+               self.keys[key].set_fresh(false);
+            }
+         }
          self.events.push(Event {
             keycode: action,
             kind,
@@ -505,7 +543,9 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
                }
                return HandlingResult::DoubleUp;
             }
-
+            Kind::AxisEngage | Kind::AxisDisengage => {
+               return HandlingResult::Unhandled;
+            }
             _ => {}
          }
          self.resolve(*key, event.kind, event.value);
@@ -529,6 +569,9 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
             Kind::Up => {
                self.keys[*key].counter = 0;
             }
+            Kind::AxisEngage | Kind::AxisDisengage => {
+               return HandlingResult::Unhandled;
+            }
             _ => {}
          }
          self.resolve(*key, event.kind, event.value);
@@ -540,6 +583,9 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
 
 impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandler<A, Z, Q> for ComboHandlerSimple<A, Z, Q> {
    fn handle(&mut self, event: Event<A>) -> HandlingResult {
+      if let Kind::AxisEngage | Kind::AxisDisengage = event.kind {
+         return HandlingResult::Unhandled;
+      }
       if let Some(key) = self.domain.get(&event.keycode) {
          self.resolve(*key, event.kind, event.value);
          return HandlingResult::Ok;
@@ -553,6 +599,10 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandler<A, Z, Q> for Combo
    fn events(&mut self) -> &mut Q {
       &mut self.events
    }
+
+   fn is_masking(&self) -> bool {
+      self.masks > 0
+   }
 }
 
 fn close_active_combos<Z: Keycode>(
@@ -564,17 +614,21 @@ fn close_active_combos<Z: Keycode>(
    for key in group.active_combos.drain() {
       // terminate the actions it modified
       keys[key].close();
-      if keys[key].is_immediate()
-         && let Some(action) = keys[key]
-            .active_combo
-            .and_then(|combo| keys[key].get_combo(combo, keys_combos).action)
-      {
-         // keyup modifiers did not produce a keydown
-         events.push(Event {
-            keycode: action,
-            kind: Kind::Up,
-            value: 0,
-         });
+      // keyup modifiers did not produce a keydown
+      if keys[key].is_immediate() {
+         // TODO
+         if let Some(combo) = keys[key].active_combo {
+            events.push(Event {
+               keycode: keys[key].get_combo(combo, keys_combos).action.unwrap(),
+               kind: if keys[key].is_axis() {
+                  Kind::AxisDisengage
+               } else {
+                  Kind::Up
+               },
+               value: 0,
+            });
+            keys[key].active_combo = None;
+         }
       }
    }
 }
@@ -620,6 +674,10 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandler<A, Z, Q> for Combo
    fn events(&mut self) -> &mut Q {
       &mut self.0.events
    }
+
+   fn is_masking(&self) -> bool {
+      self.0.is_masking()
+   }
 }
 
 /// Sanitizes the events with a keydown - keyup counter for each key. Only produces an effect
@@ -663,6 +721,10 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandler<A, Z, Q> for Combo
    fn events(&mut self) -> &mut Q {
       &mut self.0.events
    }
+
+   fn is_masking(&self) -> bool {
+      self.0.is_masking()
+   }
 }
 
 /// This is an implementation of [`ComboHandler`] with dynamic dispatch.
@@ -683,31 +745,35 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandler<A, Z, Q> for Combo
    fn events(&mut self) -> &mut Q {
       &mut self.handler.events
    }
+
+   fn is_masking(&self) -> bool {
+      self.handler.is_masking()
+   }
 }
 
 impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> From<ComboHandlerSimple<A, Z, Q>> for ComboHandlerDyn<A, Z, Q> {
    fn from(value: ComboHandlerSimple<A, Z, Q>) -> Self {
-      Self{
+      Self {
          handler: value,
-         method: ComboHandlerSimple::<A, Z, Q>::handle
+         method: ComboHandlerSimple::<A, Z, Q>::handle,
       }
    }
 }
 
 impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> From<ComboHandlerStrict<A, Z, Q>> for ComboHandlerDyn<A, Z, Q> {
    fn from(value: ComboHandlerStrict<A, Z, Q>) -> Self {
-      Self{
+      Self {
          handler: value.0,
-         method: ComboHandlerSimple::<A, Z, Q>::handle_strict
+         method: ComboHandlerSimple::<A, Z, Q>::handle_strict,
       }
    }
 }
 
 impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> From<ComboHandlerCounting<A, Z, Q>> for ComboHandlerDyn<A, Z, Q> {
    fn from(value: ComboHandlerCounting<A, Z, Q>) -> Self {
-      Self{
+      Self {
          handler: value.0,
-         method: ComboHandlerSimple::<A, Z, Q>::handle_counting
+         method: ComboHandlerSimple::<A, Z, Q>::handle_counting,
       }
    }
 }

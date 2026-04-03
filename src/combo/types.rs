@@ -68,26 +68,76 @@ impl PartialOrd for Group {
 
 #[derive(Debug, Clone)]
 pub struct Key<Z: Keycode> {
+   //flags
+   pub flags: u8,
    // precomputed
    // key: Keycode,              // validate mphf
-   pub action: Option<Z>,  // action key: unmodified action
-   pub latching: bool,     // action key: after modifier deactivation
-   pub immediate: bool,    // modifier key: keydown immediately
+   pub action: Option<Z>, // action key: unmodified action
    pub combos: Range,      // action key: modified mappings
    pub groups: Range,      // modifier key: superset modifier groups
    pub cache_counter: i32, // action key: cache key
    // dynamic
-   pub open: bool,                  // requires keyup handling
    pub active_combo: Option<usize>, // action key: active action
    pub counter: u8,                 // #pending keydown events, for sanitization
 }
+
+pub const LATCHING_MASK: u8 = 1 << 0; // action key: after modifier deactivation
+pub const IMMEDIATE_MASK: u8 = 1 << 1; // modifier key: keydown immediately
+pub const OPEN_MASK: u8 = 1 << 2; // requires keyup handling
+pub const AXIS_MASK: u8 = 1 << 3; // axis: the key is an axis
+pub const FRESH_MASK: u8 = 1 << 4; // unmodified axis needs engaging
+
 impl<Z: Keycode> Key<Z> {
+   pub fn is_latching(&self) -> bool {
+      self.flags & LATCHING_MASK > 0
+   }
+
+   pub fn set_latching(&mut self, value: bool) {
+      self.flags = self.flags & !LATCHING_MASK | LATCHING_MASK * value as u8;
+   }
+
+   pub fn is_axis(&self) -> bool {
+      self.flags & AXIS_MASK > 0
+   }
+
+   pub fn set_axis(&mut self, value: bool) {
+      self.flags = self.flags & !AXIS_MASK | AXIS_MASK * value as u8;
+   }
+
+   fn is_flag_immediate(&self) -> bool {
+      self.flags & IMMEDIATE_MASK > 0
+   }
+
+   pub fn set_flag_immediate(&mut self, value: bool) {
+      self.flags = self.flags & !IMMEDIATE_MASK | IMMEDIATE_MASK * value as u8;
+   }
+
+   pub fn is_open(&self) -> bool {
+      self.flags & OPEN_MASK > 0
+   }
+
+   pub fn is_closed(&self) -> bool {
+      !self.is_open()
+   }
+
+   pub fn is_fresh(&self) -> bool {
+      self.flags & FRESH_MASK > 0
+   }
+
+   pub fn set_fresh(&mut self, value: bool) {
+      self.flags = self.flags & FRESH_MASK | FRESH_MASK * value as u8;
+   }
+
+   pub fn set_open(&mut self, value: bool) {
+      self.flags = self.flags & !OPEN_MASK | OPEN_MASK * value as u8;
+   }
+
    pub fn is_modifier(&self) -> bool {
       !self.groups.is_empty()
    }
 
    pub fn is_immediate(&self) -> bool {
-      !self.is_modifier() || self.immediate
+      !self.is_modifier() || self.is_flag_immediate()
    }
 
    pub fn iter_combos<'a>(&self, keys_combos: &'a [Combo<Z>]) -> impl Iterator<Item = Combo<Z>> + use<'a, Z> {
@@ -103,11 +153,11 @@ impl<Z: Keycode> Key<Z> {
    }
 
    pub fn close(&mut self) {
-      self.open = false
+      self.flags &= !OPEN_MASK
    }
 
    pub fn open(&mut self) {
-      self.open = true;
+      self.flags |= OPEN_MASK;
    }
 }
 
@@ -203,26 +253,27 @@ pub trait ComboHandler<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> {
    /// Returns a mutable reference to the output event queue.
    /// Useful for accessing output events or for manually pushing events.
    fn events(&mut self) -> &mut Q;
+
+   /// Returns whether the modifiers are currently in a masking state.
+   /// Useful to decide whether to passthrough unhandled events
+   fn is_masking(&self) -> bool;
 }
 
 /// This trait provides the [`ComboHandlerPassthrough::handle_passthrough`] method.
 /// It is auto-implemented when input and output keycodes are equal.
-pub trait ComboHandlerPassthrough<A: Keycode, Q: Queue<Event<A>>>:
-   ComboHandler<A, A, Q>
-{
+pub trait ComboHandlerPassthrough<A: Keycode, Q: Queue<Event<A>>>: ComboHandler<A, A, Q> {
    /// Like [`ComboHandler::handle`], but unhandled events are pushed directly
-   /// to the output events queue. The method returns the original output of [`ComboHandler::handle`].
+   /// to the output events queue, unless the modifier keys are in a masking state.
+   /// The method returns the original output of [`ComboHandler::handle`].
    ///
    /// This method is only available when input and output keycode types are the same.
    fn handle_passthrough(&mut self, event: Event<A>) -> HandlingResult;
 }
 
-impl<A: Keycode, Q: Queue<Event<A>>, T: ComboHandler<A, A, Q>>
-   ComboHandlerPassthrough<A, Q> for T
-{
+impl<A: Keycode, Q: Queue<Event<A>>, T: ComboHandler<A, A, Q>> ComboHandlerPassthrough<A, Q> for T {
    fn handle_passthrough(&mut self, event: Event<A>) -> HandlingResult {
       let result = self.handle(event);
-      if result == HandlingResult::Unhandled {
+      if result == HandlingResult::Unhandled && !self.is_masking() {
          self.events().push(event);
       }
       result

@@ -7,7 +7,9 @@ use std::hash::Hash;
 pub enum Kind {
    Up,
    Down,
-   Axis,
+   AxisUpdate,
+   AxisEngage,
+   AxisDisengage,
 }
 
 /// Generic eventAci
@@ -17,7 +19,7 @@ pub struct Event<T: Keycode> {
    pub keycode: T,
    /// What kind of event
    pub kind: Kind,
-   /// Axis value, only relevant for [`Kind::Axis`]
+   /// Axis value, only relevant for [`Kind::AxisUpdate`]
    pub value: i16,
 }
 

@@ -216,7 +216,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             event::Event::ControllerAxisMotion { axis, value, .. } => Event {
                keycode: axis.into(),
-               kind: Kind::Axis,
+               kind: Kind::AxisUpdate,
                value,
             },
 
@@ -248,7 +248,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             value,
          }) = combo_handler.events().pop_front()
          {
-            actions[action].error |= actions[action].kind == kind && kind != Kind::Axis;
+            actions[action].error |= actions[action].kind == kind && kind != Kind::AxisUpdate;
             if !actions[action].error {
                actions[action].value = value;
                actions[action].timestamp = Instant::now();
@@ -271,7 +271,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             (Kind::Down, true) => Color::RGB(178, 34, 34), // red: double keydown
             (Kind::Up, true) => Color::RGB(204, 204, 0),   // yellow: double keyup
             (Kind::Down, false) => Color::RGB(11, 218, 81),
-            (Kind::Up, false) => gradient(
+            (Kind::Up, false) | (Kind::AxisDisengage, _) => gradient(
                Color::RGB(0, 191, 255),
                Color::RGB(255, 255, 240),
                scale(
@@ -282,7 +282,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                   i16::MAX as i32,
                ) as i16,
             ),
-            (Kind::Axis, _) => gradient(
+            (Kind::AxisUpdate | Kind::AxisEngage, _) => gradient(
                Color::RGB(255, 0, 255), // blue: min axis
                Color::RGB(11, 218, 81),
                action.value,

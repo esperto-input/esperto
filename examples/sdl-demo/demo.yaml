@@ -69,6 +69,9 @@ modifiers:
   - name: RB
     keys: [ RightShoulder ]
 
+  - name: RBA
+    keys: [ RightShoulder,  South]
+
 actions:
   - key: Z
     action: Yes
@@ -96,8 +99,11 @@ actions:
       - modifier: LB
         action: Yes
   - key: TriggerRight
+    action: Yes
     modified:
       - modifier: RB
+        action: Yes
+      - modifier: LB
         action: Yes
 
   - key: X
@@ -153,6 +159,8 @@ actions:
       - modifier: RB
         action: Yes
       - modifier: Q
+        action: Yes
+      - modifier: G
         action: Yes
 #      - modifier: W
 #        action: Yes
