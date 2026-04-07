@@ -3,16 +3,24 @@ use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 
 /// Enum that represent the kind of event
+///
+/// [`Kind::AxisEngage`] and [`Kind::AxisDisengage`] events are not intended to
+/// be exposed to the user, but to be used for actions like "cursor parking".
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Kind {
+   /// Key is pressed down
    Up,
+   /// Key is released
    Down,
+   /// Axis value changed
    AxisUpdate,
+   /// Specified axis action has engaged
    AxisEngage,
+   /// Specified axis action has disengaged
    AxisDisengage,
 }
 
-/// Generic eventAci
+/// Generic event
 #[derive(Copy, Clone, Debug)]
 pub struct Event<T: Keycode> {
    /// The event code

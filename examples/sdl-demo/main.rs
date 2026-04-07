@@ -248,11 +248,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             value,
          }) = combo_handler.events().pop_front()
          {
-            actions[action].error |= actions[action].kind == kind && kind != Kind::AxisUpdate;
+            actions[action].error |= actions[action].kind == kind
+               && kind != Kind::AxisUpdate
+               && kind != Kind::AxisDisengage
+               && kind != Kind::AxisEngage;
             if !actions[action].error {
                actions[action].value = value;
                actions[action].timestamp = Instant::now();
                actions[action].kind = kind;
+            }
+            if let Kind::AxisEngage | Kind::AxisDisengage = kind {
+               println!(
+                  "ESP event: {:?} {} {}",
+                  kind,
+                  actions[action]
+                     .modifier
+                     .as_ref()
+                     .map_or(format!("{}", actions[action].key), |modifier| {
+                        format!("[{}] {}", &modifier, &actions[action].key)
+                     }),
+                  value
+               );
             }
          }
       }

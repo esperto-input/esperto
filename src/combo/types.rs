@@ -2,7 +2,7 @@
 use super::*;
 #[cfg(doc)]
 use crate::config::Config;
-use crate::types::{Event, HandlingResult, Keycode};
+use crate::types::{Event, HandlingResult, Keycode, Kind};
 use frozen_collections::FzScalarSet;
 use std::cmp::{max, Ordering};
 use std::collections::VecDeque;
@@ -72,7 +72,7 @@ pub struct Key<Z: Keycode> {
    pub flags: u8,
    // precomputed
    // key: Keycode,              // validate mphf
-   pub action: Option<Z>, // action key: unmodified action
+   pub action: Option<Z>,  // action key: unmodified action
    pub combos: Range,      // action key: modified mappings
    pub groups: Range,      // modifier key: superset modifier groups
    pub cache_counter: i32, // action key: cache key
@@ -85,7 +85,7 @@ pub const LATCHING_MASK: u8 = 1 << 0; // action key: after modifier deactivation
 pub const IMMEDIATE_MASK: u8 = 1 << 1; // modifier key: keydown immediately
 pub const OPEN_MASK: u8 = 1 << 2; // requires keyup handling
 pub const AXIS_MASK: u8 = 1 << 3; // axis: the key is an axis
-pub const FRESH_MASK: u8 = 1 << 4; // unmodified axis needs engaging
+pub const FREE_MASK: u8 = 1 << 4; // unmodified ("free") axis is engaged
 
 impl<Z: Keycode> Key<Z> {
    pub fn is_latching(&self) -> bool {
@@ -120,12 +120,12 @@ impl<Z: Keycode> Key<Z> {
       !self.is_open()
    }
 
-   pub fn is_fresh(&self) -> bool {
-      self.flags & FRESH_MASK > 0
+   pub fn is_free(&self) -> bool {
+      self.flags & FREE_MASK > 0
    }
 
-   pub fn set_fresh(&mut self, value: bool) {
-      self.flags = self.flags & FRESH_MASK | FRESH_MASK * value as u8;
+   fn set_free(&mut self, value: bool) {
+      self.flags = self.flags & !FREE_MASK | FREE_MASK * value as u8;
    }
 
    pub fn set_open(&mut self, value: bool) {
@@ -158,6 +158,34 @@ impl<Z: Keycode> Key<Z> {
 
    pub fn open(&mut self) {
       self.flags |= OPEN_MASK;
+   }
+
+   pub fn engage_free(&mut self, events: &mut impl Queue<Event<Z>>) {
+      events.push(Event {
+         keycode: self.action.unwrap(),
+         kind: Kind::AxisEngage,
+         value: 0,
+      });
+      self.set_free(true);
+   }
+
+   pub fn disengage_free(&mut self, events: &mut impl Queue<Event<Z>>) {
+      events.push(Event {
+         keycode: self.action.unwrap(),
+         kind: Kind::AxisDisengage,
+         value: 0,
+      });
+      self.set_free(false);
+   }
+
+   pub fn close_active_combo(&mut self, keys_combos: &[Combo<Z>], kind: Kind, events: &mut impl Queue<Event<Z>>) {
+      let action = self.get_combo(self.active_combo.unwrap(), keys_combos).action.unwrap();
+      events.push(Event {
+         keycode: action,
+         kind,
+         value: 0,
+      });
+      self.active_combo = None;
    }
 }
 
@@ -265,6 +293,8 @@ pub trait ComboHandlerPassthrough<A: Keycode, Q: Queue<Event<A>>>: ComboHandler<
    /// Like [`ComboHandler::handle`], but unhandled events are pushed directly
    /// to the output events queue, unless the modifier keys are in a masking state.
    /// The method returns the original output of [`ComboHandler::handle`].
+   ///
+   /// [`Kind::AxisEngage`] and [`Kind::AxisDisengage`] will be passed-through as [`HandlingResult::Unhandled`] events.
    ///
    /// This method is only available when input and output keycode types are the same.
    fn handle_passthrough(&mut self, event: Event<A>) -> HandlingResult;

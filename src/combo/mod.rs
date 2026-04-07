@@ -90,9 +90,7 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
             let groups_end = keys_groups.len();
 
             Key {
-               flags: types::LATCHING_MASK * self.latching as u8
-                  | types::IMMEDIATE_MASK * self.immediate as u8
-                  | types::FRESH_MASK,
+               flags: types::LATCHING_MASK * self.latching as u8 | types::IMMEDIATE_MASK * self.immediate as u8,
                action: self.action,
                combos: Range::new(combos_start, combos_end),
                groups: Range::new(groups_start, groups_end),
@@ -357,7 +355,7 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
             }
             self.keys[key].cache_counter = self.cache_counter;
 
-            // action key
+            // action key/axis
             let combos = self.keys[key].combos.len();
             let mut i = self.keys[key]
                .iter_combos(&self.keys_combos)
@@ -365,7 +363,7 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
                .unwrap_or(combos);
             if i == combos {
                // not modified
-               self.maybe_action(key, kind, value);
+               self.free_action(key, kind, value);
                return;
             }
 
@@ -376,7 +374,7 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
             while i < combos {
                let i_group = self.keys[key].get_combo(i, &self.keys_combos).group;
                if self.groups[i_group].is_active() && !(self.groups[i_group] <= self.groups[candidate_group]) {
-                  self.maybe_action(key, kind, value);
+                  self.free_action(key, kind, value);
                   return;
                }
                i += 1;
@@ -388,7 +386,7 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
                .iter_intersect(&self.groups_intersect)
                .any(|group| self.groups[*group].is_active()); // no active intersecting groups
             if conflict {
-               self.maybe_action(key, kind, value);
+               self.free_action(key, kind, value);
                return;
             }
 
@@ -407,18 +405,10 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
                if !self.keys[key].is_latching() {
                   self.groups[candidate_group].active_combos.insert(key);
                }
-               if self.keys[key].is_axis() && self.keys[key].active_combo != Some(candidate_combo) {
+               if self.keys[key].is_axis() && self.keys[key].active_combo.is_none() {
                   // disengage unmodified axis
-                  if self.keys[key].active_combo.is_none()
-                     && let Some(action) = self.keys[key].action
-                     && !self.keys[key].is_fresh()
-                  {
-                     self.events.push(Event {
-                        keycode: action,
-                        kind: Kind::AxisDisengage,
-                        value: 0,
-                     });
-                     self.keys[key].set_fresh(true);
+                  if self.keys[key].is_free() {
+                     self.keys[key].disengage_free(&mut self.events)
                   }
                   self.events.push(Event {
                      keycode: action,
@@ -491,29 +481,19 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
       self.cache_counter = self.cache_counter.wrapping_add(invalidate_cache as i32);
    }
 
-   fn maybe_action(&mut self, key: usize, kind: Kind, value: i16) {
+   fn free_action(&mut self, key: usize, kind: Kind, value: i16) {
+      if self.keys[key].is_axis() && self.keys[key].active_combo.is_some() {
+         // combo is not removed from the tinyset for performance
+         // we must check this case before disengaging
+         self.keys[key].close_active_combo(&self.keys_combos, Kind::AxisDisengage, &mut self.events);
+      }
+      self.keys[key].active_combo = None;
       if !self.is_masking()
          && self.keys[key].is_immediate()
          && let Some(action) = self.keys[key].action
       {
-         if self.keys[key].is_axis() {
-            if let Some(combo) = self.keys[key].active_combo {
-               let action = self.keys[key].get_combo(combo, &self.keys_combos).action.unwrap();
-               self.events.push(Event {
-                  keycode: action,
-                  kind: Kind::AxisDisengage,
-                  value: 0,
-               });
-               self.keys[key].active_combo = None;
-            }
-            if self.keys[key].is_fresh() {
-               self.events.push(Event {
-                  keycode: action,
-                  kind: Kind::AxisEngage,
-                  value: 0,
-               });
-               self.keys[key].set_fresh(false);
-            }
+         if self.keys[key].is_axis() && !self.keys[key].is_free() {
+            self.keys[key].engage_free(&mut self.events);
          }
          self.events.push(Event {
             keycode: action,
@@ -522,7 +502,6 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
          });
          self.keys[key].open();
       }
-      self.keys[key].active_combo = None;
    }
 
    fn handle_counting(&mut self, event: Event<A>) -> HandlingResult {
@@ -605,6 +584,8 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandler<A, Z, Q> for Combo
    }
 }
 
+// note: this cannot be a method of ComboHandlerSimple,
+// we need to pass all arrays separately for the borrow checker
 fn close_active_combos<Z: Keycode>(
    group: &mut Group,
    keys: &mut [Key<Z>],
@@ -616,18 +597,17 @@ fn close_active_combos<Z: Keycode>(
       keys[key].close();
       // keyup modifiers did not produce a keydown
       if keys[key].is_immediate() {
-         // TODO
-         if let Some(combo) = keys[key].active_combo {
-            events.push(Event {
-               keycode: keys[key].get_combo(combo, keys_combos).action.unwrap(),
-               kind: if keys[key].is_axis() {
+         // axis combos do not produce keyups, disengaged because of action conflicts
+         if keys[key].active_combo.is_some() {
+            keys[key].close_active_combo(
+               keys_combos,
+               if keys[key].is_axis() {
                   Kind::AxisDisengage
                } else {
                   Kind::Up
                },
-               value: 0,
-            });
-            keys[key].active_combo = None;
+               events,
+            );
          }
       }
    }

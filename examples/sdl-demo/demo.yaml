@@ -94,8 +94,11 @@ actions:
     modified:
       - modifier: RB
         action: Yes
+      - modifier: LB
   - key: TriggerLeft
     modified:
+      - modifier: RB
+        action: Yes
       - modifier: LB
         action: Yes
   - key: TriggerRight
