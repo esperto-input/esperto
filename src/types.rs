@@ -22,13 +22,13 @@ pub enum Kind {
 
 /// Generic event
 #[derive(Copy, Clone, Debug)]
-pub struct Event<T: Keycode> {
+pub struct Event<T: Keycode, V: Default> {
    /// The event code
    pub keycode: T,
    /// What kind of event
    pub kind: Kind,
-   /// Axis value, only relevant for [`Kind::AxisUpdate`]
-   pub value: i16,
+   /// Axis value, only relevant for [`Kind::AxisUpdate`]. Will be set to [`V::default`] for other events
+   pub value: V,
 }
 
 /// This trait is auto-implemented if the requirement are satisfied

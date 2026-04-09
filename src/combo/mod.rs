@@ -17,7 +17,7 @@ const EVENT_BUFFER_WARMUP: usize = 16;
 /// Only handle "sane" sequences. Behaviour in case of "non-sane" sequences is undefined.
 /// Use this if you can assume only "sane" sequences are produced, for example if the events
 /// are the output of a library that ensure "sane" sequences.
-pub struct ComboHandlerSimple<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> {
+pub struct ComboHandlerSimple<A: Keycode, Z: Keycode, V: Default, Q: Queue<Event<Z, V>>> {
    // precomputed
    domain: FzScalarMap<A, usize>,  // keycode to key index
    keys: Box<[Key<Z>]>,            // keys
@@ -31,26 +31,28 @@ pub struct ComboHandlerSimple<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> {
    masks: i32,         // #active masks
    cache_counter: i32, // current cache key
    events: Q,          // output event queue
+
+   _marker: std::marker::PhantomData<V>,
 }
 
-impl<A: Keycode, Z: Keycode> ComboHandlerSimple<A, Z, VecDeque<Event<Z>>> {
+impl<A: Keycode, Z: Keycode, V: Default> ComboHandlerSimple<A, Z, V, VecDeque<Event<Z, V>>> {
    /// Creates the handler object from a configuration object, using a [`VecDeque`]
    /// as event queue. The queue pre-allocates some capacity, to possibly avoid
    /// allocations during event handling.
    ///
    /// This method does a lot precomputation in order to speed up subsequent calls to
    /// the [`ComboHandler::handle`] method. It will be slow on complex configurations.
-   pub fn new(config: &Config<A, Z>) -> ComboHandlerSimple<A, Z, VecDeque<Event<Z>>> {
+   pub fn new(config: &Config<A, Z>) -> ComboHandlerSimple<A, Z, V, VecDeque<Event<Z, V>>> {
       ComboHandlerSimple::with(config, VecDeque::with_capacity(EVENT_BUFFER_WARMUP))
    }
 }
 
-impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
+impl<A: Keycode, Z: Keycode, V: Default, Q: Queue<Event<Z, V>>> ComboHandlerSimple<A, Z, V, Q> {
    /// Creates the handler object from a configuration object, using the provided queue.
    ///
    /// This method does a lot precomputation in order to speed up subsequent calls to
    /// the [`ComboHandlerSimple::handle`] method. It will be slow on complex configurations.
-   pub fn with(config: &Config<A, Z>, queue: Q) -> ComboHandlerSimple<A, Z, Q> {
+   pub fn with(config: &Config<A, Z>, queue: Q) -> ComboHandlerSimple<A, Z, V, Q> {
       struct MutKey<B: Keycode> {
          action: Option<B>,
          latching: bool,
@@ -277,10 +279,11 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
          masks: 0,
          cache_counter: 1,
          events: queue,
+         _marker: std::marker::PhantomData,
       }
    }
 
-   fn resolve(&mut self, key: usize, kind: Kind, value: i16) {
+   fn resolve(&mut self, key: usize, kind: Kind, value: V) {
       match kind {
          Kind::Down | Kind::AxisUpdate => {
             let mut invalidate_cache = false;
@@ -413,7 +416,7 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
                   self.events.push(Event {
                      keycode: action,
                      kind: Kind::AxisEngage,
-                     value: 0,
+                     value: V::default(),
                   });
                }
                if self.keys[key].is_immediate() {
@@ -462,13 +465,13 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
                         self.events.push(Event {
                            keycode: action,
                            kind: Kind::Down,
-                           value: 0,
+                           value: V::default(),
                         });
                      }
                      self.events.push(Event {
                         keycode: action,
                         kind: Kind::Up,
-                        value: 0,
+                        value: V::default(),
                      })
                   });
             }
@@ -481,7 +484,7 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
       self.cache_counter = self.cache_counter.wrapping_add(invalidate_cache as i32);
    }
 
-   fn free_action(&mut self, key: usize, kind: Kind, value: i16) {
+   fn free_action(&mut self, key: usize, kind: Kind, value: V) {
       if self.keys[key].is_axis() && self.keys[key].active_combo.is_some() {
          // combo is not removed from the tinyset for performance
          // we must check this case before disengaging
@@ -504,7 +507,7 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
       }
    }
 
-   fn handle_counting(&mut self, event: Event<A>) -> HandlingResult {
+   fn handle_counting(&mut self, event: Event<A, V>) -> HandlingResult {
       if let Some(key) = self.domain.get(&event.keycode) {
          match event.kind {
             Kind::Down => {
@@ -533,7 +536,7 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
       HandlingResult::Unhandled
    }
 
-   fn handle_strict(&mut self, event: Event<A>) -> HandlingResult {
+   fn handle_strict(&mut self, event: Event<A, V>) -> HandlingResult {
       if let Some(key) = self.domain.get(&event.keycode) {
          match event.kind {
             Kind::Down if self.keys[*key].counter >= 1 => {
@@ -560,8 +563,10 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerSimple<A, Z, Q> {
    }
 }
 
-impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandler<A, Z, Q> for ComboHandlerSimple<A, Z, Q> {
-   fn handle(&mut self, event: Event<A>) -> HandlingResult {
+impl<A: Keycode, Z: Keycode, V: Default, Q: Queue<Event<Z, V>>> ComboHandler<A, Z, V, Q>
+   for ComboHandlerSimple<A, Z, V, Q>
+{
+   fn handle(&mut self, event: Event<A, V>) -> HandlingResult {
       if let Kind::AxisEngage | Kind::AxisDisengage = event.kind {
          return HandlingResult::Unhandled;
       }
@@ -586,11 +591,11 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandler<A, Z, Q> for Combo
 
 // note: this cannot be a method of ComboHandlerSimple,
 // we need to pass all arrays separately for the borrow checker
-fn close_active_combos<Z: Keycode>(
+fn close_active_combos<Z: Keycode, V: Default>(
    group: &mut Group,
    keys: &mut [Key<Z>],
    keys_combos: &[Combo<Z>],
-   events: &mut impl Queue<Event<Z>>,
+   events: &mut impl Queue<Event<Z, V>>,
 ) {
    for key in group.active_combos.drain() {
       // terminate the actions it modified
@@ -619,32 +624,36 @@ fn close_active_combos<Z: Keycode>(
 ///
 /// Can result in unwanted behaviour when multiple **input** keys share an output (they "alias" each other),
 /// and are pressed together: releasing any one will interrupt the action.
-pub struct ComboHandlerStrict<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>>(ComboHandlerSimple<A, Z, Q>);
+pub struct ComboHandlerStrict<A: Keycode, Z: Keycode, V: Default, Q: Queue<Event<Z, V>>>(
+   ComboHandlerSimple<A, Z, V, Q>,
+);
 
-impl<A: Keycode, Z: Keycode> ComboHandlerStrict<A, Z, VecDeque<Event<Z>>> {
+impl<A: Keycode, Z: Keycode, V: Default> ComboHandlerStrict<A, Z, V, VecDeque<Event<Z, V>>> {
    /// Creates the handler object from a configuration object, using a [`VecDeque`]
    /// as event queue. The queue pre-allocates some capacity, to possibly avoid
    /// allocations during event handling.
    ///
    /// This method does a lot precomputation in order to speed up subsequent calls to
    /// the [`ComboHandler::handle`] method. It will be slow on complex configurations.
-   pub fn new(config: &Config<A, Z>) -> ComboHandlerStrict<A, Z, VecDeque<Event<Z>>> {
+   pub fn new(config: &Config<A, Z>) -> ComboHandlerStrict<A, Z, V, VecDeque<Event<Z, V>>> {
       ComboHandlerStrict(ComboHandlerSimple::new(config))
    }
 }
 
-impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerStrict<A, Z, Q> {
+impl<A: Keycode, Z: Keycode, V: Default, Q: Queue<Event<Z, V>>> ComboHandlerStrict<A, Z, V, Q> {
    /// Creates the handler object from a configuration object, using the provided queue.
    ///
    /// This method does a lot precomputation in order to speed up subsequent calls to
    /// the [`ComboHandler::handle`] method. It will be slow on complex configurations.
-   pub fn with(config: &Config<A, Z>, queue: Q) -> ComboHandlerStrict<A, Z, Q> {
+   pub fn with(config: &Config<A, Z>, queue: Q) -> ComboHandlerStrict<A, Z, V, Q> {
       ComboHandlerStrict(ComboHandlerSimple::with(config, queue))
    }
 }
 
-impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandler<A, Z, Q> for ComboHandlerStrict<A, Z, Q> {
-   fn handle(&mut self, event: Event<A>) -> HandlingResult {
+impl<A: Keycode, Z: Keycode, V: Default, Q: Queue<Event<Z, V>>> ComboHandler<A, Z, V, Q>
+   for ComboHandlerStrict<A, Z, V, Q>
+{
+   fn handle(&mut self, event: Event<A, V>) -> HandlingResult {
       self.0.handle_strict(event)
    }
 
@@ -666,32 +675,36 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandler<A, Z, Q> for Combo
 /// This handles sequences where multiple keydown are always eventually followed by as many keyup.
 /// For example, when multiple input keys share an output (they "alias" each other). In this case,
 /// the action is interrupted when the last input is released.
-pub struct ComboHandlerCounting<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>>(ComboHandlerSimple<A, Z, Q>);
+pub struct ComboHandlerCounting<A: Keycode, Z: Keycode, V: Default, Q: Queue<Event<Z, V>>>(
+   ComboHandlerSimple<A, Z, V, Q>,
+);
 
-impl<A: Keycode, Z: Keycode> ComboHandlerCounting<A, Z, VecDeque<Event<Z>>> {
+impl<A: Keycode, Z: Keycode, V: Default> ComboHandlerCounting<A, Z, V, VecDeque<Event<Z, V>>> {
    /// Creates the handler object from a configuration object, using a [`VecDeque`]
    /// as event queue. The queue pre-allocates some capacity, to possibly avoid
    /// allocations during event handling.
    ///
    /// This method does a lot precomputation in order to speed up subsequent calls to
    /// the [`ComboHandler::handle`] method. It will be slow on complex configurations.
-   pub fn new(config: &Config<A, Z>) -> ComboHandlerCounting<A, Z, VecDeque<Event<Z>>> {
+   pub fn new(config: &Config<A, Z>) -> ComboHandlerCounting<A, Z, V, VecDeque<Event<Z, V>>> {
       ComboHandlerCounting(ComboHandlerSimple::new(config))
    }
 }
 
-impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandlerCounting<A, Z, Q> {
+impl<A: Keycode, Z: Keycode, V: Default, Q: Queue<Event<Z, V>>> ComboHandlerCounting<A, Z, V, Q> {
    /// Creates the handler object from a configuration object, using the provided queue.
    ///
    /// This method does a lot precomputation in order to speed up subsequent calls to
    /// the [`ComboHandler::handle`] method. It will be slow on complex configurations.
-   pub fn with(config: &Config<A, Z>, queue: Q) -> ComboHandlerCounting<A, Z, Q> {
+   pub fn with(config: &Config<A, Z>, queue: Q) -> ComboHandlerCounting<A, Z, V, Q> {
       ComboHandlerCounting(ComboHandlerSimple::with(config, queue))
    }
 }
 
-impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandler<A, Z, Q> for ComboHandlerCounting<A, Z, Q> {
-   fn handle(&mut self, event: Event<A>) -> HandlingResult {
+impl<A: Keycode, Z: Keycode, V: Default, Q: Queue<Event<Z, V>>> ComboHandler<A, Z, V, Q>
+   for ComboHandlerCounting<A, Z, V, Q>
+{
+   fn handle(&mut self, event: Event<A, V>) -> HandlingResult {
       self.0.handle_counting(event)
    }
 
@@ -712,13 +725,15 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandler<A, Z, Q> for Combo
 /// using `.into()`.
 ///
 /// It is recommended to use this instead of `Box<dyn ComboHandler<A, Z, Q>>`
-pub struct ComboHandlerDyn<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> {
-   handler: ComboHandlerSimple<A, Z, Q>,
-   method: fn(&mut ComboHandlerSimple<A, Z, Q>, Event<A>) -> HandlingResult,
+pub struct ComboHandlerDyn<A: Keycode, Z: Keycode, V: Default, Q: Queue<Event<Z, V>>> {
+   handler: ComboHandlerSimple<A, Z, V, Q>,
+   method: fn(&mut ComboHandlerSimple<A, Z, V, Q>, Event<A, V>) -> HandlingResult,
 }
 
-impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandler<A, Z, Q> for ComboHandlerDyn<A, Z, Q> {
-   fn handle(&mut self, event: Event<A>) -> HandlingResult {
+impl<A: Keycode, Z: Keycode, V: Default, Q: Queue<Event<Z, V>>> ComboHandler<A, Z, V, Q>
+   for ComboHandlerDyn<A, Z, V, Q>
+{
+   fn handle(&mut self, event: Event<A, V>) -> HandlingResult {
       (self.method)(&mut self.handler, event)
    }
 
@@ -731,29 +746,35 @@ impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> ComboHandler<A, Z, Q> for Combo
    }
 }
 
-impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> From<ComboHandlerSimple<A, Z, Q>> for ComboHandlerDyn<A, Z, Q> {
-   fn from(value: ComboHandlerSimple<A, Z, Q>) -> Self {
+impl<A: Keycode, Z: Keycode, V: Default, Q: Queue<Event<Z, V>>> From<ComboHandlerSimple<A, Z, V, Q>>
+   for ComboHandlerDyn<A, Z, V, Q>
+{
+   fn from(value: ComboHandlerSimple<A, Z, V, Q>) -> Self {
       Self {
          handler: value,
-         method: ComboHandlerSimple::<A, Z, Q>::handle,
+         method: ComboHandlerSimple::<A, Z, V, Q>::handle,
       }
    }
 }
 
-impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> From<ComboHandlerStrict<A, Z, Q>> for ComboHandlerDyn<A, Z, Q> {
-   fn from(value: ComboHandlerStrict<A, Z, Q>) -> Self {
+impl<A: Keycode, Z: Keycode, V: Default, Q: Queue<Event<Z, V>>> From<ComboHandlerStrict<A, Z, V, Q>>
+   for ComboHandlerDyn<A, Z, V, Q>
+{
+   fn from(value: ComboHandlerStrict<A, Z, V, Q>) -> Self {
       Self {
          handler: value.0,
-         method: ComboHandlerSimple::<A, Z, Q>::handle_strict,
+         method: ComboHandlerSimple::<A, Z, V, Q>::handle_strict,
       }
    }
 }
 
-impl<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> From<ComboHandlerCounting<A, Z, Q>> for ComboHandlerDyn<A, Z, Q> {
-   fn from(value: ComboHandlerCounting<A, Z, Q>) -> Self {
+impl<A: Keycode, Z: Keycode, V: Default, Q: Queue<Event<Z, V>>> From<ComboHandlerCounting<A, Z, V, Q>>
+   for ComboHandlerDyn<A, Z, V, Q>
+{
+   fn from(value: ComboHandlerCounting<A, Z, V, Q>) -> Self {
       Self {
          handler: value.0,
-         method: ComboHandlerSimple::<A, Z, Q>::handle_counting,
+         method: ComboHandlerSimple::<A, Z, V, Q>::handle_counting,
       }
    }
 }

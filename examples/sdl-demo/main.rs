@@ -122,7 +122,7 @@ fn get_system_font_bytes() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
 fn handler_with_mode(
    mode: Mode,
    config: &Config<SdlKeycode, usize>,
-) -> ComboHandlerDyn<SdlKeycode, usize, VecDeque<Event<usize>>> {
+) -> ComboHandlerDyn<SdlKeycode, usize, i16, VecDeque<Event<usize, i16>>> {
    match mode {
       Mode::Strict => ComboHandlerStrict::new(config).into(),
       Mode::Counting => ComboHandlerCounting::new(config).into(),
@@ -183,7 +183,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
    'gameloop: loop {
       for event in event_pump.poll_iter() {
-         let event: Event<SdlKeycode> = match event {
+         let event = match event {
             event::Event::Quit { .. } => break 'gameloop,
 
             event::Event::KeyDown {

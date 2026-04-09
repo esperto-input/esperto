@@ -4,7 +4,7 @@ use super::*;
 use crate::config::Config;
 use crate::types::{Event, HandlingResult, Keycode, Kind};
 use frozen_collections::FzScalarSet;
-use std::cmp::{max, Ordering};
+use std::cmp::{Ordering, max};
 use std::collections::VecDeque;
 use tinyset::SetUsize;
 
@@ -160,30 +160,35 @@ impl<Z: Keycode> Key<Z> {
       self.flags |= OPEN_MASK;
    }
 
-   pub fn engage_free(&mut self, events: &mut impl Queue<Event<Z>>) {
+   pub fn engage_free<V: Default>(&mut self, events: &mut impl Queue<Event<Z, V>>) {
       events.push(Event {
          keycode: self.action.unwrap(),
          kind: Kind::AxisEngage,
-         value: 0,
+         value: V::default(),
       });
       self.set_free(true);
    }
 
-   pub fn disengage_free(&mut self, events: &mut impl Queue<Event<Z>>) {
+   pub fn disengage_free<V: Default>(&mut self, events: &mut impl Queue<Event<Z, V>>) {
       events.push(Event {
          keycode: self.action.unwrap(),
          kind: Kind::AxisDisengage,
-         value: 0,
+         value: V::default(),
       });
       self.set_free(false);
    }
 
-   pub fn close_active_combo(&mut self, keys_combos: &[Combo<Z>], kind: Kind, events: &mut impl Queue<Event<Z>>) {
+   pub fn close_active_combo<V: Default>(
+      &mut self,
+      keys_combos: &[Combo<Z>],
+      kind: Kind,
+      events: &mut impl Queue<Event<Z, V>>,
+   ) {
       let action = self.get_combo(self.active_combo.unwrap(), keys_combos).action.unwrap();
       events.push(Event {
          keycode: action,
          kind,
-         value: 0,
+         value: V::default(),
       });
       self.active_combo = None;
    }
@@ -262,7 +267,7 @@ impl<T> Queue<T> for Vec<T> {
 /// * [`ComboHandlerStrict`] best-effort handling of "non-sane" sequences
 /// * [`ComboHandlerCounting`] handles sequences where keyup and keydown events are paired
 /// * [`ComboHandlerDyn`] handler with dynamic dispatch
-pub trait ComboHandler<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> {
+pub trait ComboHandler<A: Keycode, Z: Keycode, V: Default, Q: Queue<Event<Z, V>>> {
    /// Handles an input event, and returns [`HandlingResult`]
    ///
    /// Events that are not handled do not produce any output events.
@@ -276,7 +281,7 @@ pub trait ComboHandler<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> {
    /// and new events are added to the queue. To avoid (possibly costly) memory allocations
    /// it is advised that you handle all output events before calling this method, so the queue
    /// doesn't need to grow to accommodate for the new events.
-   fn handle(&mut self, event: Event<A>) -> HandlingResult;
+   fn handle(&mut self, event: Event<A, V>) -> HandlingResult;
 
    /// Returns a mutable reference to the output event queue.
    /// Useful for accessing output events or for manually pushing events.
@@ -289,7 +294,7 @@ pub trait ComboHandler<A: Keycode, Z: Keycode, Q: Queue<Event<Z>>> {
 
 /// This trait provides the [`ComboHandlerPassthrough::handle_passthrough`] method.
 /// It is auto-implemented when input and output keycodes are equal.
-pub trait ComboHandlerPassthrough<A: Keycode, Q: Queue<Event<A>>>: ComboHandler<A, A, Q> {
+pub trait ComboHandlerPassthrough<A: Keycode, V: Default, Q: Queue<Event<A, V>>>: ComboHandler<A, A, V, Q> {
    /// Like [`ComboHandler::handle`], but unhandled events are pushed directly
    /// to the output events queue, unless the modifier keys are in a masking state.
    /// The method returns the original output of [`ComboHandler::handle`].
@@ -297,11 +302,13 @@ pub trait ComboHandlerPassthrough<A: Keycode, Q: Queue<Event<A>>>: ComboHandler<
    /// [`Kind::AxisEngage`] and [`Kind::AxisDisengage`] will be passed-through as [`HandlingResult::Unhandled`] events.
    ///
    /// This method is only available when input and output keycode types are the same.
-   fn handle_passthrough(&mut self, event: Event<A>) -> HandlingResult;
+   fn handle_passthrough(&mut self, event: Event<A, V>) -> HandlingResult;
 }
 
-impl<A: Keycode, Q: Queue<Event<A>>, T: ComboHandler<A, A, Q>> ComboHandlerPassthrough<A, Q> for T {
-   fn handle_passthrough(&mut self, event: Event<A>) -> HandlingResult {
+impl<A: Keycode, V: Default + Copy, Q: Queue<Event<A, V>>, T: ComboHandler<A, A, V, Q>> ComboHandlerPassthrough<A, V, Q>
+   for T
+{
+   fn handle_passthrough(&mut self, event: Event<A, V>) -> HandlingResult {
       let result = self.handle(event);
       if result == HandlingResult::Unhandled && !self.is_masking() {
          self.events().push(event);
