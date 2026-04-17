@@ -2,7 +2,7 @@
 use super::*;
 #[cfg(doc)]
 use crate::config::Config;
-use crate::types::{Event, HandlingResult, Keycode, Kind};
+use crate::types::{Event, HandlingResult, InputKeycode, Kind, OutputKeycode};
 use frozen_collections::FzScalarSet;
 use std::cmp::{Ordering, max};
 use std::collections::VecDeque;
@@ -67,7 +67,7 @@ impl PartialOrd for Group {
 }
 
 #[derive(Debug, Clone)]
-pub struct Key<Z: Keycode> {
+pub struct Key<Z: OutputKeycode> {
    //flags
    pub flags: u8,
    // precomputed
@@ -87,7 +87,7 @@ pub const OPEN_MASK: u8 = 1 << 2; // requires keyup handling
 pub const AXIS_MASK: u8 = 1 << 3; // axis: the key is an axis
 pub const FREE_MASK: u8 = 1 << 4; // unmodified ("free") axis is engaged
 
-impl<Z: Keycode> Key<Z> {
+impl<Z: OutputKeycode> Key<Z> {
    pub fn is_latching(&self) -> bool {
       self.flags & LATCHING_MASK > 0
    }
@@ -195,7 +195,7 @@ impl<Z: Keycode> Key<Z> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Combo<Z: Keycode> {
+pub struct Combo<Z> {
    pub action: Option<Z>, // target action
    pub group: usize,      // modifier group index
 }
@@ -254,7 +254,8 @@ impl<T> Queue<T> for Vec<T> {
 /// This trait provides the main functionalities of the library.
 /// The handling of "non-sane" input sequence depends on the implementation.
 /// It is generic in the input and output keycode types, but it requires
-/// that they implement the [`Keycode`] trait, which includes the [`Copy`] trait.
+/// that they implement the [`InputKeycode`] and [`OutputKeycode`] traits,
+/// which includes the [`Copy`] trait.
 ///
 /// If your events are need to be heap allocated types (that are not [`Copy`]),
 /// consider storing them on an indexable collection, and use the indices as keycodes.
@@ -267,7 +268,7 @@ impl<T> Queue<T> for Vec<T> {
 /// * [`ComboHandlerStrict`] best-effort handling of "non-sane" sequences
 /// * [`ComboHandlerCounting`] handles sequences where keyup and keydown events are paired
 /// * [`ComboHandlerDyn`] handler with dynamic dispatch
-pub trait ComboHandler<A: Keycode, Z: Keycode, V: Default, Q: Queue<Event<Z, V>>> {
+pub trait ComboHandler<A: InputKeycode, Z: OutputKeycode, V: Default, Q: Queue<Event<Z, V>>> {
    /// Handles an input event, and returns [`HandlingResult`]
    ///
    /// Events that are not handled do not produce any output events.
@@ -294,7 +295,9 @@ pub trait ComboHandler<A: Keycode, Z: Keycode, V: Default, Q: Queue<Event<Z, V>>
 
 /// This trait provides the [`ComboHandlerPassthrough::handle_passthrough`] method.
 /// It is auto-implemented when input and output keycodes are equal.
-pub trait ComboHandlerPassthrough<A: Keycode, V: Default, Q: Queue<Event<A, V>>>: ComboHandler<A, A, V, Q> {
+pub trait ComboHandlerPassthrough<A: InputKeycode, V: Default, Q: Queue<Event<A, V>>>:
+   ComboHandler<A, A, V, Q>
+{
    /// Like [`ComboHandler::handle`], but unhandled events are pushed directly
    /// to the output events queue, unless the modifier keys are in a masking state.
    /// The method returns the original output of [`ComboHandler::handle`].
@@ -305,8 +308,8 @@ pub trait ComboHandlerPassthrough<A: Keycode, V: Default, Q: Queue<Event<A, V>>>
    fn handle_passthrough(&mut self, event: Event<A, V>) -> HandlingResult;
 }
 
-impl<A: Keycode, V: Default + Copy, Q: Queue<Event<A, V>>, T: ComboHandler<A, A, V, Q>> ComboHandlerPassthrough<A, V, Q>
-   for T
+impl<A: InputKeycode, V: Default + Copy, Q: Queue<Event<A, V>>, T: ComboHandler<A, A, V, Q>>
+   ComboHandlerPassthrough<A, V, Q> for T
 {
    fn handle_passthrough(&mut self, event: Event<A, V>) -> HandlingResult {
       let result = self.handle(event);

@@ -1,4 +1,5 @@
-use frozen_collections::Scalar;
+/// Re exported fron [`frozen_collections`]
+pub use frozen_collections::Scalar;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 
@@ -22,19 +23,24 @@ pub enum Kind {
 
 /// Generic event
 #[derive(Copy, Clone, Debug)]
-pub struct Event<T: Keycode, V: Default> {
+pub struct Event<T, V: Default> {
    /// The event code
    pub keycode: T,
    /// What kind of event
    pub kind: Kind,
-   /// Axis value, only relevant for [`Kind::AxisUpdate`]. Will be set to [`V::default`] for other events
+   /// Axis value, only relevant for [`Kind::AxisUpdate`]. Will be set to [`Default::default`] for other events
    pub value: V,
 }
 
-/// This trait is auto-implemented if the requirement are satisfied
-pub trait Keycode: Hash + Scalar {}
+/// This trait is auto-implemented if the requirements are satisfied
+pub trait InputKeycode: Hash + Scalar {}
 
-impl<T: Hash + Scalar> Keycode for T {}
+impl<T: Hash + Scalar> InputKeycode for T {}
+
+/// This trait is auto-implemented if the requirements are satisfied
+pub trait OutputKeycode: Hash + Copy + Eq {}
+
+impl<T: Hash + Copy + Eq> OutputKeycode for T {}
 
 pub enum ConfigValidationError<A> {
    DuplicateModifierId(String),

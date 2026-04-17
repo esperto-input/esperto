@@ -1,6 +1,10 @@
 use crate::types::ConfigValidationError::*;
 use crate::types::ConfigValidationWarning::*;
 use crate::types::{ConfigValidationError, ConfigValidationWarning};
+#[cfg(doc)]
+use crate::types::{InputKeycode, OutputKeycode};
+#[cfg(doc)]
+use crate::combo::ComboHandler;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -8,7 +12,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 
 /// Configuration object, can be serialized and deserialized if the feature `"serde"` is enabled.
-/// If the generics implement [`crate::types::Keycode`], it can be used to create a [`crate::combo::ComboHandler`] object.
+/// If the generics implement [`InputKeycode`] and [`InputKeycode`], it can be used to create a [`ComboHandler`] object.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Config<A: Eq + Hash, Z: Eq + Hash> {
