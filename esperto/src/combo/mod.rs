@@ -3,6 +3,7 @@ use crate::config::Config;
 use crate::types::{Event, Kind, OutputKeycode};
 use crate::types::{HandlingResult, InputKeycode};
 use frozen_collections::FzScalarMap;
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use tinyset::SetUsize;
 
@@ -53,7 +54,7 @@ impl<A: InputKeycode, Z: OutputKeycode, V: Default, Q: Queue<Event<Z, V>>> Combo
    /// This method does a lot precomputation in order to speed up subsequent calls to
    /// the [`ComboHandlerSimple::handle`] method. It will be slow on complex configurations.
    pub fn with(config: &Config<A, Z>, queue: Q) -> ComboHandlerSimple<A, Z, V, Q> {
-      struct MutKey<Y: OutputKeycode> {
+      struct TempKey<Y: OutputKeycode> {
          action: Option<Y>,
          latching: bool,
          immediate: bool,
@@ -61,7 +62,7 @@ impl<A: InputKeycode, Z: OutputKeycode, V: Default, Q: Queue<Event<Z, V>>> Combo
          groups: Vec<usize>,
       }
 
-      impl<Y: OutputKeycode> Default for MutKey<Y> {
+      impl<Y: OutputKeycode> Default for TempKey<Y> {
          fn default() -> Self {
             Self {
                action: None,
@@ -73,7 +74,7 @@ impl<A: InputKeycode, Z: OutputKeycode, V: Default, Q: Queue<Event<Z, V>>> Combo
          }
       }
 
-      impl<Y: OutputKeycode> MutKey<Y> {
+      impl<Y: OutputKeycode> TempKey<Y> {
          fn freeze(
             mut self,
             groups: &[Group],
@@ -103,7 +104,7 @@ impl<A: InputKeycode, Z: OutputKeycode, V: Default, Q: Queue<Event<Z, V>>> Combo
          }
       }
 
-      struct MutGroup {
+      struct TempGroup {
          index: usize,
          mask: bool,
          greater: Vec<usize>,
@@ -112,7 +113,7 @@ impl<A: InputKeycode, Z: OutputKeycode, V: Default, Q: Queue<Event<Z, V>>> Combo
          keys: Vec<usize>,
       }
 
-      impl MutGroup {
+      impl TempGroup {
          fn freeze(
             self,
             groups_pred: &mut Vec<usize>,
@@ -133,9 +134,7 @@ impl<A: InputKeycode, Z: OutputKeycode, V: Default, Q: Queue<Event<Z, V>>> Combo
             let keys = Range::new(keys_start, keys_end);
 
             Group {
-               index: self.index,
                mask: self.mask,
-               greater: self.greater.into_iter().collect(),
                pred: Range::new(pred_start, pred_end),
                intersect: Range::new(intersect_start, intersect_end),
                keys,
@@ -145,6 +144,27 @@ impl<A: InputKeycode, Z: OutputKeycode, V: Default, Q: Queue<Event<Z, V>>> Combo
                active_greater: 0,
                mask_weight: 0,
             }
+         }
+      }
+
+      impl PartialEq for TempGroup {
+         fn eq(&self, other: &Self) -> bool {
+            self.index == other.index
+         }
+      }
+
+      impl PartialOrd for TempGroup {
+         fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            if self == other {
+               return Some(Ordering::Equal);
+            }
+            if self.greater.contains(&other.index) {
+               return Some(Ordering::Less);
+            }
+            if other.greater.contains(&self.index) {
+               return Some(Ordering::Greater);
+            }
+            None
          }
       }
 
@@ -186,7 +206,7 @@ impl<A: InputKeycode, Z: OutputKeycode, V: Default, Q: Queue<Event<Z, V>>> Combo
       }
 
       let mut domain: HashMap<A, usize> = HashMap::new();
-      let mut temp_keys: Vec<MutKey<Z>> = vec![];
+      let mut temp_keys: Vec<TempKey<Z>> = vec![];
       // domain: populate modifiers
       for (i, group) in groups.into_iter().enumerate() {
          for keycode in group {
@@ -194,7 +214,7 @@ impl<A: InputKeycode, Z: OutputKeycode, V: Default, Q: Queue<Event<Z, V>>> Combo
                temp_keys[*key].groups.push(i);
             } else {
                domain.insert(keycode, temp_keys.len());
-               let mut temp_key = MutKey::default();
+               let mut temp_key = TempKey::default();
                temp_key.groups.push(i);
                temp_keys.push(temp_key);
             }
@@ -204,45 +224,29 @@ impl<A: InputKeycode, Z: OutputKeycode, V: Default, Q: Queue<Event<Z, V>>> Combo
       let mut groups_keys = vec![];
       let mut pred_adjacency = vec![];
       let mut intersect_adjacency = vec![];
-      let mut groups: Box<[Group]> = edges
+      let groups: Box<[TempGroup]> = edges
          .into_iter()
          .enumerate()
          .zip(config.modifiers.iter())
-         .map(|((index, (above, below, intersect)), modifier_decl)| {
-            // collect modifier keys
-            let mut keys = Vec::new();
-            for key in &modifier_decl.keys {
-               keys.push(domain[&key]);
-            }
-            MutGroup {
-               index,
-               mask: modifier_decl.masking,
-               greater: above,
-               pred: below,
-               intersect,
-               keys,
-            }
+         .map(|((index, (above, below, intersect)), modifier_decl)| TempGroup {
+            index,
+            mask: modifier_decl.masking,
+            greater: above,
+            pred: below,
+            intersect,
+            keys: modifier_decl.keys.iter().map(|key| domain[&key]).collect(),
          })
-         .map(|group| group.freeze(&mut pred_adjacency, &mut intersect_adjacency, &mut groups_keys))
          .collect();
-
-      for group in 0..groups.len() {
-         groups[group].mask_weight = groups[group].mask as i32
-            - groups[group]
-               .iter_pred(&pred_adjacency)
-               .map(|group| groups[*group].mask as i32)
-               .sum::<i32>();
-      }
 
       // domain: populate action keys
       for action in config.actions.iter() {
-         let temp_key: &mut MutKey<Z>;
+         let temp_key: &mut TempKey<Z>;
          if let Some(i) = domain.get(&action.key) {
             temp_key = &mut temp_keys[*i];
          } else {
             let i = temp_keys.len();
             domain.insert(action.key, i);
-            temp_keys.push(MutKey::default());
+            temp_keys.push(TempKey::default());
             temp_key = &mut temp_keys[i];
          }
 
@@ -261,6 +265,22 @@ impl<A: InputKeycode, Z: OutputKeycode, V: Default, Q: Queue<Event<Z, V>>> Combo
             )
          }
       }
+
+      // compile groups
+      let mut groups: Box<[Group]> = groups
+         .into_iter()
+         .map(|group| group.freeze(&mut pred_adjacency, &mut intersect_adjacency, &mut groups_keys))
+         .collect();
+
+      // mask weight computation
+      for group in 0..groups.len() {
+         groups[group].mask_weight = groups[group].mask as i32
+            - groups[group]
+               .iter_pred(&pred_adjacency)
+               .map(|group| groups[*group].mask as i32)
+               .sum::<i32>();
+      }
+
       let mut keys_combos = vec![];
       let mut keys_groups = vec![];
 
@@ -335,7 +355,6 @@ impl<A: InputKeycode, Z: OutputKeycode, V: Default, Q: Queue<Event<Z, V>>> Combo
 
             if self.keys[key].cache_counter == self.cache_counter {
                if self.keys[key].is_immediate() {
-                  self.keys[key].open();
                   self.keys[key]
                      .active_combo
                      .and_then(|i| {
@@ -347,6 +366,7 @@ impl<A: InputKeycode, Z: OutputKeycode, V: Default, Q: Queue<Event<Z, V>>> Combo
                      })
                      .or(self.keys[key].action.filter(|_| !self.is_masking()))
                      .map(|action| {
+                        self.keys[key].open();
                         self.events.push(Event {
                            keycode: action,
                            kind,
@@ -362,8 +382,9 @@ impl<A: InputKeycode, Z: OutputKeycode, V: Default, Q: Queue<Event<Z, V>>> Combo
             let combos = self.keys[key].combos.len();
             let mut i = self.keys[key]
                .iter_combos(&self.keys_combos)
-               .position(|combo| self.groups[combo.group].is_active())
+               .position(|combo| self.groups[combo.group].is_active() && !self.groups[combo.group].is_shadowed())
                .unwrap_or(combos);
+
             if i == combos {
                // not modified
                self.free_action(key, kind, value);
@@ -376,7 +397,8 @@ impl<A: InputKeycode, Z: OutputKeycode, V: Default, Q: Queue<Event<Z, V>>> Combo
             // search action key conflicts
             while i < combos {
                let i_group = self.keys[key].get_combo(i, &self.keys_combos).group;
-               if self.groups[i_group].is_active() && !(self.groups[i_group] <= self.groups[candidate_group]) {
+               if i_group != candidate_group && self.groups[i_group].is_active() && !self.groups[i_group].is_shadowed()
+               {
                   self.free_action(key, kind, value);
                   return;
                }
@@ -384,8 +406,7 @@ impl<A: InputKeycode, Z: OutputKeycode, V: Default, Q: Queue<Event<Z, V>>> Combo
             }
 
             // search modifier key conflicts
-            let conflict: bool = self.groups[candidate_group].is_shadowed() // no active supergroups
-               || self.groups[candidate_group]
+            let conflict: bool = self.groups[candidate_group]
                .iter_intersect(&self.groups_intersect)
                .any(|group| self.groups[*group].is_active()); // no active intersecting groups
             if conflict {

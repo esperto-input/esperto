@@ -182,6 +182,8 @@ actions:
     modified:
       - modifier: Q
         action: Yes
+#      - modifier: QWE
+#        action: Yes
       - modifier: W
         action: Yes
       - modifier: E

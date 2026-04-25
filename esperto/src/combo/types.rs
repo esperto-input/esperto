@@ -3,17 +3,15 @@ use super::*;
 #[cfg(doc)]
 use crate::config::Config;
 use crate::types::{Event, HandlingResult, InputKeycode, Kind, OutputKeycode};
-use frozen_collections::FzScalarSet;
-use std::cmp::{Ordering, max};
+use std::cmp::max;
 use std::collections::VecDeque;
 use tinyset::SetUsize;
 
 #[derive(Debug, Clone)]
 pub struct Group {
    // precomputed
-   pub index: usize,                // index of self (for partial ordering)
    pub mask: bool,                  // masking flag
-   pub greater: FzScalarSet<usize>, // supergroups
+   // pub greater: FzScalarSet<usize>, // supergroups
    pub pred: Range,                 // neighbouring subgroups
    pub intersect: Range,            // partial intersectors
    pub keys: Range,                 // modifier keys
@@ -44,25 +42,6 @@ impl Group {
 
    pub fn iter_keys<'a>(&self, groups_keys: &'a [usize]) -> impl Iterator<Item = &'a usize> + use<'a> {
       self.keys.into_iter().map(|i| &groups_keys[i])
-   }
-}
-impl PartialEq for Group {
-   fn eq(&self, other: &Self) -> bool {
-      self.index == other.index
-   }
-}
-impl PartialOrd for Group {
-   fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-      if self == other {
-         return Some(Ordering::Equal);
-      }
-      if self.greater.contains(&other.index) {
-         return Some(Ordering::Less);
-      }
-      if other.greater.contains(&self.index) {
-         return Some(Ordering::Greater);
-      }
-      None
    }
 }
 

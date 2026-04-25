@@ -240,7 +240,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          };
          println!("SDL event: {:?} {} {}", event.kind, event.keycode, event.value);
          if let result @ (HandlingResult::DoubleDown | HandlingResult::DoubleUp) = combo_handler.handle(event) {
-            println!("{:?}", result)
+            println!("Error: {:?}", result)
          }
          while let Some(Event {
             keycode: action,
@@ -257,19 +257,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                actions[action].timestamp = Instant::now();
                actions[action].kind = kind;
             }
-            if let Kind::AxisEngage | Kind::AxisDisengage = kind {
-               println!(
-                  "ESP event: {:?} {} {}",
-                  kind,
-                  actions[action]
-                     .modifier
-                     .as_ref()
-                     .map_or(format!("{}", actions[action].key), |modifier| {
-                        format!("[{}] {}", &modifier, &actions[action].key)
-                     }),
-                  value
-               );
-            }
+            println!(
+               "ESP event: {:?} {} {}",
+               kind,
+               actions[action]
+                  .modifier
+                  .as_ref()
+                  .map_or(format!("{}", actions[action].key), |modifier| {
+                     format!("[{}] {}", &modifier, &actions[action].key)
+                  }),
+               value
+            );
          }
       }
       // --- render ---
