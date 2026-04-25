@@ -1,4 +1,4 @@
-use frozen_collections::Scalar;
+use esperto::types::Scalar;
 use sdl3::gamepad::{Axis, Button};
 use sdl3::keyboard;
 use serde::{Deserialize, Serialize};

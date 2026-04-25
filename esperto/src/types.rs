@@ -1,7 +1,10 @@
-/// Re exported fron [`frozen_collections`]
-pub use frozen_collections::Scalar;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
+
+#[cfg(feature = "macros")]
+pub use esperto_macros::Scalar;
+/// Re-exported from [`frozen_collections::Scalar`].
+pub use frozen_collections::Scalar;
 
 /// Enum that represent the kind of event
 ///

@@ -1,0 +1,19 @@
+[package]
+name = "esperto-macros"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "internal crate for procedural macros"
+homepage.workspace = true
+readme.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2.0", default-features = false, features = ["full"] }
+quote = { version = "1.0", default-features = false }
+proc-macro2 = "1.0.106"
+proc-macro-error2 = "2.0.1"
+frozen-collections-core = "0.9.1"

@@ -260,15 +260,27 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "esperto"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "clap",
+ "esperto-macros",
  "font-kit",
  "frozen-collections",
  "sdl3",
  "serde",
  "serde_yaml",
  "tinyset",
+]
+
+[[package]]
+name = "esperto-macros"
+version = "0.6.2"
+dependencies = [
+ "frozen-collections-core",
+ "proc-macro-error2",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -360,7 +372,6 @@ checksum = "5d2ae70ff5b0de400d1f640f587aa39f2ee13b660125e26273fef78dbe8a39c5"
 dependencies = [
  "foldhash",
  "frozen-collections-core",
- "frozen-collections-macros",
  "rand 0.10.0",
  "rand_chacha 0.10.0",
 ]
@@ -380,16 +391,6 @@ dependencies = [
  "quote",
  "serde",
  "syn",
-]
-
-[[package]]
-name = "frozen-collections-macros"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e81abbab34eb5f41f096bc7d97fc61e0b5bc4cbe03989a950f0d1b4667b193f3"
-dependencies = [
- "frozen-collections-core",
- "proc-macro-error2",
 ]
 
 [[package]]
@@ -554,6 +555,7 @@ dependencies = [
  "proc-macro-error-attr2",
  "proc-macro2",
  "quote",
+ "syn",
 ]
 
 [[package]]
@@ -666,12 +668,11 @@ dependencies = [
 
 [[package]]
 name = "sdl3"
-version = "0.17.3"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce0693cede7f7901e968e5539f87174d0fb5fac5d489a3e3be52b2b4a0b49c5"
+checksum = "96e613fca5924ccab8ab8369ab292a1b4720b125e98007fbda163f4ce7176472"
 dependencies = [
  "bitflags 2.11.0",
- "lazy_static",
  "libc",
  "sdl3-sys",
  "sdl3-ttf-sys",
