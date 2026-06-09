@@ -1,0 +1,14 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "rel"
+  workflow_dispatch:
+
+jobs:
+  shared-ci:
+    permissions:
+      contents: write
+    uses: esperto-input/.github/.github/workflows/release.yml@master
+    secrets: inherit
