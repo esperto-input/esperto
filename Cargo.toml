@@ -4,10 +4,10 @@ members = ["esperto", "esperto-macros"]
 resolver = "3"
 
 [workspace.package]
-version = "0.7.0"
+version = "0.7.1"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/KayJay7/esperto.git"
+repository = "https://github.com/esperto-input/esperto.git"
 description = "esperto input system implementation"
-homepage = "https://github.com/KayJay7/esperto"
+homepage = "https://github.com/esperto-input/esperto"
 readme = "README.md"
